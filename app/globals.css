@@ -221,7 +221,7 @@
   .summary-type-size {
     @apply h4 relative z-20 w-full text-right !important;
   }
-  .summary-type-title {
+  .recent-file-name {
     @apply h5 relative z-20 text-center !important;
   }
   .dashboard-recent-files {

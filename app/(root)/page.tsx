@@ -2,60 +2,38 @@ import ActionDropdown from "@/components/ActionDropdown";
 import FormattedDateTime from "@/components/FormattedDateTime";
 import Thumbnail from "@/components/Thumbnail";
 import { Separator } from "@/components/ui/separator";
-import { getFiles } from "@/lib/actions/file.actions";
-import { getUsageSummary } from "@/lib/utils";
+import { getFiles, getTotalSpaceUsed } from "@/lib/actions/file.actions";
+import { calculatePercentage, convertFileSize, formatDateTime, getUsageSummary } from "@/lib/utils";
 import Image from "next/image";
 import Link from "next/link";
 import { Models } from "node-appwrite";
 
 const Dashboard = async () => {
   // Parallel requests
-  const [files] = await Promise.all([
+  const [files, totalSpace] = await Promise.all([
     getFiles({ types: [], limit: 10 }),
-    // getTotalSpaceUsed(),
+    getTotalSpaceUsed(),
   ]);
 
-  const dataToDisplay = getUsageSummary({
-    document: {
-      size: 20,
-      lastUpdate: "10:15 am, 10 Okt",
-    },
-    image: {
-      size: 20,
-      lastUpdate: "10:15 am, 10 Okt",
-    },
-    video: {
-      size: 20,
-      lastUpdate: "10:15 am, 10 Okt",
-    },
-    audio: {
-      size: 20,
-      lastUpdate: "10:15 am, 10 Okt",
-    },
-    other: {
-      size: 20,
-      lastUpdate: "10:15 am, 10 Okt",
-    },
-  });
-
-  console.log(files);
+  const usageSummary = getUsageSummary(totalSpace);
+  console.log(totalSpace);
 
   return (
     <div className="dashboard-container">
       <section>
         <div className="chart mt-7 transition-all hover:scale-105">
           <div className="chart-container flex flex-col justify-center items-center">
-            <span>Chart</span>
-            <span className="chart-total-percentage mb-2">65%</span>
+            {/* <span>Chart</span> */}
+            <span className="chart-total-percentage mb-2">{calculatePercentage(totalSpace.used)} %</span>
             <span className="chart-title">Space used</span>
           </div>
           <div className="chart-container flex flex-col justify-center items-start">
             <span className="chart-title">Available Storage</span>
-            <span className="chart-description">82GB / 128GB</span>
+            <span className="chart-description">{convertFileSize(totalSpace.used)} / {convertFileSize(totalSpace.all)}</span>
           </div>
         </div>
         <div className="dashboard-summary-list">
-          {dataToDisplay.map((data, index) => {
+          {usageSummary.map((data, index) => {
             return (
               <div key={data.title} className="dashboard-summary-card">
                 <div className="flex justify-end">
@@ -66,14 +44,14 @@ const Dashboard = async () => {
                     width={50}
                     height={10}
                   />
-                  <span className="summary-type-size">20 GB</span>
+                  <span className="summary-type-size">{convertFileSize(data.size)}</span>
                 </div>
 
                 <div className="flex flex-col gap-4 items-center mt-10 mb-5 ">
                   <div className="h5">{data.title}</div>
                   <Separator />
                   <div className="recent-file-date">Last update</div>
-                  <div className="recent-file-date">10:15 am, 10 Okt</div>
+                  <div className="recent-file-date">{formatDateTime(data.latestDate)}</div>
                 </div>
               </div>
             );

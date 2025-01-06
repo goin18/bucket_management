@@ -8,6 +8,7 @@ import { constructFileUrl, getFileType, parseStringify } from "../utils";
 import { revalidatePath } from "next/cache";
 import { getCurrentUser } from "./user.actions";
 import { log } from "console";
+import { MAX_BUCKET } from "@/constants";
 
 const handleError = (error: unknown, message: string) => {
   console.log(error, message);
@@ -23,39 +24,38 @@ export const uploadFile = async ({
   const { storage, databases } = await createAdminClient();
 
   try {
-      const inputFile = InputFile.fromBuffer(file, file.name);
-      const bucketFile = await storage.createFile(
-        appwriteConfig.bucketId,
+    const inputFile = InputFile.fromBuffer(file, file.name);
+    const bucketFile = await storage.createFile(
+      appwriteConfig.bucketId,
+      ID.unique(),
+      inputFile
+    );
+
+    const fileDocument = {
+      type: getFileType(bucketFile.name).type,
+      name: bucketFile.name,
+      url: constructFileUrl(bucketFile.$id),
+      extension: getFileType(bucketFile.name).extension,
+      size: bucketFile.sizeOriginal,
+      owner: ownerId,
+      accountId,
+      users: [],
+      bucketFileId: bucketFile.$id,
+    };
+    const newFile = await databases
+      .createDocument(
+        appwriteConfig.databaseId,
+        appwriteConfig.filesCollectionId,
         ID.unique(),
-        inputFile,
-      );
+        fileDocument
+      )
+      .catch(async (error: unknown) => {
+        await storage.deleteFile(appwriteConfig.bucketId, bucketFile.$id);
+        handleError(error, "Failed to create file document");
+      });
 
-      const fileDocument = {
-        type: getFileType(bucketFile.name).type,
-        name: bucketFile.name,
-        url: constructFileUrl(bucketFile.$id),
-        extension: getFileType(bucketFile.name).extension,
-        size: bucketFile.sizeOriginal,
-        owner: ownerId,
-        accountId,
-        users: [],
-        bucketFileId: bucketFile.$id,
-      };
-      const newFile = await databases
-        .createDocument(
-          appwriteConfig.databaseId,
-          appwriteConfig.filesCollectionId,
-          ID.unique(),
-          fileDocument,
-        )
-        .catch(async (error: unknown) => {
-          await storage.deleteFile(appwriteConfig.bucketId, bucketFile.$id);
-          handleError(error, "Failed to create file document");
-        });
-
-      revalidatePath(path);
-      return parseStringify(newFile);
-      
+    revalidatePath(path);
+    return parseStringify(newFile);
   } catch (error) {
     handleError(error, "Failed to upload file");
   }
@@ -66,7 +66,7 @@ const createQueries = (
   types: string[],
   searchText?: string,
   sort?: string,
-  limit?: number,
+  limit?: number
 ) => {
   const queries = [
     Query.or([
@@ -83,7 +83,7 @@ const createQueries = (
     const [sortBy, orderBy] = sort.split("-");
 
     queries.push(
-      orderBy === "asc" ? Query.orderAsc(sortBy) : Query.orderDesc(sortBy),
+      orderBy === "asc" ? Query.orderAsc(sortBy) : Query.orderDesc(sortBy)
     );
   }
   return queries;
@@ -104,15 +104,15 @@ export const getFiles = async ({
 
     const queries = createQueries(currentUser, types, searchText, sort, limit);
 
-    console.log("Querisrs");    
-    console.log({queries});
+    console.log("Querisrs");
+    console.log({ queries });
     const files = await databases.listDocuments(
       appwriteConfig.databaseId,
       appwriteConfig.filesCollectionId,
-      queries,
+      queries
     );
     console.log("Files");
-    console.log({files});
+    console.log({ files });
     return parseStringify(files);
   } catch (error) {
     handleError(error, "Failed to get files");
@@ -135,7 +135,7 @@ export const renameFile = async ({
       fileId,
       {
         name: newName,
-      },
+      }
     );
 
     revalidatePath(path);
@@ -159,7 +159,7 @@ export const updateFileUsers = async ({
       fileId,
       {
         users: emails,
-      },
+      }
     );
 
     revalidatePath(path);
@@ -170,9 +170,9 @@ export const updateFileUsers = async ({
 };
 
 export const deleteFile = async ({
-  fileId, 
+  fileId,
   bucketFileId,
-  path
+  path,
 }: DeleteFileProps) => {
   const { databases, storage } = await createAdminClient();
 
@@ -180,7 +180,7 @@ export const deleteFile = async ({
     const deletedFile = await databases.deleteDocument(
       appwriteConfig.databaseId,
       appwriteConfig.filesCollectionId,
-      fileId,
+      fileId
     );
 
     if (deletedFile) {
@@ -192,4 +192,47 @@ export const deleteFile = async ({
   } catch (error) {
     handleError(error, "Failed to delete file");
   }
-}
+};
+
+export const getTotalSpaceUsed = async () => {
+  try {
+    const { databases } = await createSessionClient();
+    const currentUser = await getCurrentUser();
+
+    if (!currentUser) throw new Error("User is not authenticated!");
+
+    const files = await databases.listDocuments(
+      appwriteConfig.databaseId,
+      appwriteConfig.filesCollectionId,
+      [Query.equal("owner", [currentUser.$id])]
+    );
+
+    const totalSpace = {
+      image: { size: 0, latestDate: "" },
+      document: { size: 0, latestDate: "" },
+      video: { size: 0, latestDate: "" },
+      audio: { size: 0, latestDate: "" },
+      other: { size: 0, latestDate: "" },
+      used: 0,
+      all: MAX_BUCKET
+      // all: 2 * 1024 * 1024 * 1024 /* 2GB available bucket storage */,
+    };
+
+    files.documents.forEach((file) => {
+      const fileType = file.type as FileType;
+      totalSpace[fileType].size += file.size;
+      totalSpace.used += file.size;
+
+      if (
+        !totalSpace[fileType].latestDate ||
+        new Date(file.$updatedAt) > new Date(totalSpace[fileType].latestDate)
+      ) {
+        totalSpace[fileType].latestDate = file.$updatedAt;
+      }
+    });
+
+    return parseStringify(totalSpace);
+  } catch (error) {
+    handleError(error, "Error calculating total space used:, ");
+  }
+};
